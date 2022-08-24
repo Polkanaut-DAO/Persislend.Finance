@@ -1,12 +1,13 @@
-// SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.9;
+//SPDX-License-Identifier: Unlicense
+pragma solidity ^0.8.0;
 
 import "../Data/Data.sol";
 import "../../IntresetModel/InterestModel.sol";
-
 import "../../Core/Contracts/Manager.sol";
 
-contract ETHMarket {
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+contract TokenMarket {
     address payable Owner;
 
     string marketName;
@@ -18,8 +19,9 @@ contract ETHMarket {
 
     MarketData DataStorageContract;
     InterestModel InterestModelContract;
-
     Manager ManagerContract;
+
+    IERC20 IERC20TokenContract;
 
     modifier OnlyOwner() {
         require(msg.sender == Owner, "OnlyOwner");
@@ -31,8 +33,9 @@ contract ETHMarket {
         _;
     }
 
-    constructor() {
+    constructor(address _DAIErc20) {
         Owner = payable(msg.sender);
+        IERC20TokenContract = IERC20(_DAIErc20);
     }
 
     function setManagerContract(address _ManagerContract)
@@ -76,40 +79,30 @@ contract ETHMarket {
         return true;
     }
 
-    // deposit function in platform
-    function deposit(uint256 _amountToDeposit) external payable returns (bool) {
-        // get user address as payable
+    function deposit(uint256 _amountToDeposit) external returns (bool) {
         address payable _userAddress = payable(msg.sender);
 
-        // require amount to deposit is more than 0 to stop wasting gas;
-        require(
-            _amountToDeposit > 0 && msg.value > 0,
-            "You have to deposit more than 0 amount"
-        );
-        // require input is same as msg.value;
-        require(
-            msg.value == _amountToDeposit,
-            "MSG value should be same as input value"
-        );
+        require(_amountToDeposit > 0);
 
         // calculate intreset params for user and market
         ManagerContract.applyInterestHandlers(_userAddress, marketID);
 
-        // update amount to user and market data
         DataStorageContract.addDepositAmount(_userAddress, _amountToDeposit);
+
+        IERC20TokenContract.transferFrom(
+            _userAddress,
+            address(this),
+            _amountToDeposit
+        );
 
         return true;
     }
 
-    function repay(uint256 _amountToRepay) external payable returns (bool) {
+    function repay(uint256 _amountToRepay) external returns (bool) {
         address payable _userAddress = payable(msg.sender);
-
         require(_amountToRepay > 0);
-        require(msg.value == _amountToRepay);
 
-        // RewardManagerContract.updateRewardManagerData(_userAddress);
-        _updateUserMarketInterest(_userAddress);
-
+        // calculate intreset params for user and market
         ManagerContract.applyInterestHandlers(_userAddress, marketID);
 
         uint256 userBorrowAmount = DataStorageContract.getUserBorrowAmount(
@@ -121,6 +114,12 @@ contract ETHMarket {
         }
 
         DataStorageContract.subBorrowAmount(_userAddress, _amountToRepay);
+
+        IERC20TokenContract.transferFrom(
+            _userAddress,
+            address(this),
+            _amountToRepay
+        );
         return true;
     }
 
@@ -152,7 +151,7 @@ contract ETHMarket {
 
         DataStorageContract.subDepositAmount(_userAddress, adjustedAmount);
 
-        _userAddress.transfer(adjustedAmount);
+        IERC20TokenContract.transfer(_userAddress, adjustedAmount);
 
         return true;
     }
@@ -172,31 +171,24 @@ contract ETHMarket {
             price
         ) = ManagerContract.applyInterestHandlers(_userAddress, marketID);
 
-        require(
-            unifiedMul(_amountToBorrow, price) <=
-                DataStorageContract.getMarketLimitOfAction()
-        );
-
         uint256 adjustedAmount = _getUserMaxAmountToBorrowInBorrowFunc(
             _amountToBorrow,
             userLiquidityAmount
         );
 
+        require(
+            unifiedMul(adjustedAmount, price) <=
+                DataStorageContract.getMarketLimitOfAction()
+        );
+
         DataStorageContract.addBorrowAmount(_userAddress, adjustedAmount);
 
-        _userAddress.transfer(adjustedAmount);
+        IERC20TokenContract.transfer(_userAddress, adjustedAmount);
 
         return true;
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////// APPLY INTEREST
-    /// in this process, we we get connected to intreset model contract;
-    /// we will calc delta blocks ! last time platform get updated ;
-    /// and with this delta blocks we update and calc our exchange rate, global exchange rate; action exchange rate; user exchange rate;
-    /// we will calc Annual Borrow/Deposit Interest Rate with total deposit and total borrow;
-    // we will delta params with user deposit and borrow balance;
-
-    // update user and market intreset params;
     function updateUserMarketInterest(address payable _userAddress)
         external
         returns (uint256, uint256)
@@ -204,14 +196,11 @@ contract ETHMarket {
         return _updateUserMarketInterest(_userAddress);
     }
 
-    // update user and market intreset params;
     function _updateUserMarketInterest(address payable _userAddress)
         internal
         returns (uint256, uint256)
     {
-        // check if user is new , to ser user access and update user deposit and borrow exchange rate with global exchange rate;
         _checkIfUserIsNew(_userAddress);
-        // this is function to know and get information about how many blocks, platform is not updated !
         _checkIfThisIsFirstAction();
         return _getUpdatedInterestParams(_userAddress);
     }
@@ -220,24 +209,18 @@ contract ETHMarket {
         internal
         returns (bool)
     {
-        // check user access on platform;
         if (DataStorageContract.getUserIsAccessed(_userAddress)) {
             return false;
         }
 
-        // if user is new we set user access to true;
         DataStorageContract.setUserAccessed(_userAddress, true);
 
-        // get global exchange rate for deposit and borrow from platform;
         (uint256 gDEXR, uint256 gBEXR) = DataStorageContract
             .getGlDepositBorrowEXR();
-        // set exchange rate to user;
         DataStorageContract.updateUserEXR(_userAddress, gDEXR, gBEXR);
         return true;
     }
 
-    // this is function to know and get information about how many blocks, platform is not updated !
-    // we use this delta blocks to update uur exhcnage rate;
     function _checkIfThisIsFirstAction() internal returns (bool) {
         uint256 _LastTimeBlockUpdated = DataStorageContract
             .getLastTimeBlockUpdated();
@@ -253,13 +236,10 @@ contract ETHMarket {
         return false;
     }
 
-    // this is how we update intreset model of our box ; :)
     function _getUpdatedInterestParams(address payable _userAddress)
         internal
         returns (uint256, uint256)
     {
-        // get updated intreset params from intreset model contract / this is for user !
-        // there is delta amount between deposit and borrow for user ?
         bool _depositIsNegative;
         uint256 _depositDeltaAmount;
         uint256 _glDepositEXR;
@@ -280,7 +260,6 @@ contract ETHMarket {
             false
         );
 
-        // update user exchange rates with new global exchange rates;
         DataStorageContract.updateUserEXR(
             _userAddress,
             _glDepositEXR,
@@ -304,13 +283,11 @@ contract ETHMarket {
         bool _borrowIsNegative,
         uint256 _borrowDeltaAmount
     ) internal returns (uint256, uint256) {
-        // in this function we get current and saved market data and user data about deposit and borrow;
         uint256 _totalDepositAmount;
         uint256 _userDepositAmount;
         uint256 _totalBorrowAmount;
         uint256 _userBorrowAmount;
 
-        // now we update this data by new delta and negative params;
         (
             _totalDepositAmount,
             _userDepositAmount,
@@ -324,7 +301,6 @@ contract ETHMarket {
             _borrowDeltaAmount
         );
 
-        // after calc new data , we update market and user amount ! new deposit and borrow data;
         DataStorageContract.updateAmounts(
             _userAddress,
             _totalDepositAmount,
@@ -352,7 +328,6 @@ contract ETHMarket {
             uint256
         )
     {
-        // get current amount for user and market !
         uint256 _totalDepositAmount;
         uint256 _userDepositAmount;
         uint256 _totalBorrowAmount;
@@ -364,7 +339,6 @@ contract ETHMarket {
             _userBorrowAmount
         ) = DataStorageContract.getAmounts(_userAddress);
 
-        // by condition if there is delta amount for data , we make update and return new data;
         if (_depositIsNegative) {
             _totalDepositAmount = sub(_totalDepositAmount, _depositDeltaAmount);
             _userDepositAmount = sub(_userDepositAmount, _depositDeltaAmount);
@@ -397,7 +371,6 @@ contract ETHMarket {
         return _getUpdatedInterestAmountsForUser(_userAddress);
     }
 
-    // update intreset params and get updated data for user !
     function _getUpdatedInterestAmountsForUser(address payable _userAddress)
         internal
         view
@@ -417,7 +390,6 @@ contract ETHMarket {
         return (_userDepositAmount, _userBorrowAmount);
     }
 
-    // update intreset params and get updated data for market !
     function _getUpdatedInterestAmountsForMarket(address payable _userAddress)
         internal
         view
@@ -437,7 +409,6 @@ contract ETHMarket {
         return (_totalDepositAmount, _totalBorrowAmount);
     }
 
-    // get updated intreset params and get updated data for user and market !
     function _calcAmountWithInterest(address payable _userAddress)
         internal
         view
@@ -483,7 +454,6 @@ contract ETHMarket {
 
     // BORROW //////////////////////////////////////////////
 
-    // how much user can borrow from platform ? we use this func in front !
     function getUserMaxAmountToBorrow(address payable _userAddress)
         external
         view
@@ -492,24 +462,19 @@ contract ETHMarket {
         return _getUserMaxAmountToBorrow(_userAddress);
     }
 
-    // how much user can borrow from platform ?
     function _getUserMaxAmountToBorrow(address payable _userAddress)
         internal
         view
         returns (uint256)
     {
-        // get free liquidityDeposit of user with correct decimals and struct !
         uint256 _marketLiquidityLimit = _getMarketLIQAfterInterestUpdateWithLimit(
                 _userAddress
             );
 
-        // now make some calc in manager contract ! we get how many asset user can borrow based on free liq of user !
         uint256 _howMuchUserCanBorrow = ManagerContract.getHowMuchUserCanBorrow(
             _userAddress,
             marketID
         );
-
-        // main free to borrow is _howMuchUserCanBorrow;
         uint256 _freeToBorrow = _howMuchUserCanBorrow;
         if (_marketLiquidityLimit < _freeToBorrow) {
             _freeToBorrow = _marketLiquidityLimit;
@@ -518,12 +483,10 @@ contract ETHMarket {
         return _freeToBorrow;
     }
 
-    // we use this function in our platform !
     function _getUserMaxAmountToBorrowInBorrowFunc(
         uint256 _requestedToBorrow,
         uint256 _userLiq
     ) internal view returns (uint256) {
-        // market liq limit is total dep * liqlim (1 ether or 1 * 10 ** 18) - total borr !
         uint256 _marketLiquidityLimit = _getMarketLiquidityWithLimit();
 
         uint256 _freeToBorrow = _requestedToBorrow;
@@ -554,18 +517,13 @@ contract ETHMarket {
         view
         returns (uint256)
     {
-        // for get user withdrawable amount ! we should first update user and market intreset params and data !
         uint256 _userUpdatedDepositAmountWithInterest;
         uint256 _userUpdatedBorrowAmountWithInterest;
-
-        // we first make update in intreset params for user and market and them we user user data;
         (
             _userUpdatedDepositAmountWithInterest,
             _userUpdatedBorrowAmountWithInterest
         ) = _getUpdatedInterestAmountsForUser(_userAddress);
 
-        // for get user withdrawable amount ! we should first update user and market intreset params and data !
-        // we first make update in intreset params for user and market and them we user market data;
         uint256 _marketLIQAfterInterestUpdate = _getMarketLIQAfterInterestUpdate(
                 _userAddress
             );
@@ -593,28 +551,22 @@ contract ETHMarket {
         uint256 _requestedToWithdraw,
         uint256 _userWithdrawableAmount
     ) internal view returns (uint256) {
-        // we get user deposit from market data contract;
         uint256 _userDeposit = DataStorageContract.getUserDepositAmount(
             _userAddress
         );
 
-        // we get market liq >>> total dep - total borrow
         uint256 _marketLiq = _getMarketLiquidity();
 
-        // user is free to with his user deposit;
         uint256 _freeToWithdraw = _userDeposit;
 
-        // this is amount that user asked !
         if (_freeToWithdraw > _requestedToWithdraw) {
             _freeToWithdraw = _requestedToWithdraw;
         }
 
-        // this is amount that we got from manager contract and it's withdrawable
         if (_freeToWithdraw > _userWithdrawableAmount) {
             _freeToWithdraw = _userWithdrawableAmount;
         }
 
-        // this free liq in market
         if (_freeToWithdraw > _marketLiq) {
             _freeToWithdraw = _marketLiq;
         }
@@ -671,7 +623,6 @@ contract ETHMarket {
         view
         returns (uint256)
     {
-        // first we get market total balance for deposit and borrow after update intreset params for user and market in intresetModel contract;
         uint256 _totalDepositAmount;
         uint256 _totalBorrowAmount;
         (
@@ -679,7 +630,6 @@ contract ETHMarket {
             _totalBorrowAmount
         ) = _getUpdatedInterestAmountsForMarket(_userAddress);
 
-        // now deposit amount should be more than 0 and more than borrow amount;
         if (_totalDepositAmount == 0) {
             return 0;
         }
@@ -688,15 +638,12 @@ contract ETHMarket {
             return 0;
         }
 
-        // now we return D-B
         return sub(_totalDepositAmount, _totalBorrowAmount);
     }
 
-    // in this function we make calc for return how much user can borrow
     function _getMarketLIQAfterInterestUpdateWithLimit(
         address payable _userAddress
     ) internal view returns (uint256) {
-        // we get user total deposit and borrow from data contract
         uint256 _totalDepositAmount;
         uint256 _totalBorrowAmount;
         (
@@ -704,39 +651,32 @@ contract ETHMarket {
             _totalBorrowAmount
         ) = _getUpdatedInterestAmountsForMarket(_userAddress);
 
-        // if user deposit is 0; so user can't borrow any amount and we will return 0 !
         if (_totalDepositAmount == 0) {
             return 0;
         }
 
-        // we get liquidityDeposit , it's user deposit amount mul start point or 1 * 10 ** 18; for get correct uint with correct decimals !
         uint256 liquidityDeposit = unifiedMul(
             _totalDepositAmount,
             DataStorageContract.getMarketLiquidityLimit()
         );
 
-        // if userdeposit is < borrow so user can't borrow any money and again we will return 0;
         if (liquidityDeposit < _totalBorrowAmount) {
             return 0;
         }
 
-        // now we return liq amount sub total borrow ! for example 10 - 0 ! is 10 ! this is free liquidity of user;
         return sub(liquidityDeposit, _totalBorrowAmount);
     }
 
-    // we use this function to get delta between deposit and borrow !
     function _getMarketLiquidity() internal view returns (uint256) {
         uint256 _totalDepositAmount = DataStorageContract
             .getMarketDepositTotalAmount();
         uint256 _totalBorrowAmount = DataStorageContract
             .getMarketBorrowTotalAmount();
 
-        // if deposit in market is 0; we return 0;
         if (_totalDepositAmount == 0) {
             return 0;
         }
 
-        // if deposit is < borrow / calc is wrong and we should return 0;
         if (_totalDepositAmount < _totalBorrowAmount) {
             return 0;
         }
@@ -744,7 +684,6 @@ contract ETHMarket {
         return sub(_totalDepositAmount, _totalBorrowAmount);
     }
 
-    // this is similarly to _getMarketLiquidity, but here we use MarketLiquidityLimit to get currect number of free liq ! total deposit * 10 ** 18;
     function _getMarketLiquidityWithLimit() internal view returns (uint256) {
         uint256 _totalDepositAmount = DataStorageContract
             .getMarketDepositTotalAmount();

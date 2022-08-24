@@ -2,7 +2,7 @@
 pragma solidity ^0.8.9;
 
 contract MarketData {
-    // address payable Owner;
+    address payable Owner;
 
     address MarketContract;
     address InterestModelContract;
@@ -26,8 +26,6 @@ contract MarketData {
     struct MarketInterestModel {
         uint256 _marketBorrowLimit;
         uint256 _marketMarginCallLimit;
-        uint256 _marketMinInterestRate;
-        uint256 _marketLiquiditySen;
     }
     MarketInterestModel MarketInterestModelInstance;
 
@@ -40,28 +38,23 @@ contract MarketData {
     }
     mapping(address => UserModel) UserModelMapping;
 
-    // modifier OnlyOwner() {
-    //     require(msg.sender == Owner, "OnlyOwner");
-    //     _;
-    // }
+    modifier OnlyOwner() {
+        require(msg.sender == Owner, "OnlyOwner");
+        _;
+    }
 
-    // modifier OnlyMyContracts() {
-    //     address msgSender = msg.sender;
-    //     require(
-    //         (msgSender == MarketContract) ||
-    //             (msgSender == InterestModelContract) ||
-    //             (msgSender == Owner)
-    //     );
-    //     _;
-    // }
+    modifier OnlyMyContracts() {
+        address msgSender = msg.sender;
+        require(
+            (msgSender == MarketContract) ||
+                (msgSender == InterestModelContract) ||
+                (msgSender == Owner)
+        );
+        _;
+    }
 
-    constructor(
-        uint256 _borrowLimit,
-        uint256 _marginCallLimit,
-        uint256 _minimumInterestRate,
-        uint256 _liquiditySensitivity
-    ) {
-        // Owner = payable(msg.sender);
+    constructor(uint256 _borrowLimit, uint256 _marginCallLimit) {
+        Owner = payable(msg.sender);
 
         _initializeEXR();
 
@@ -70,8 +63,6 @@ contract MarketData {
 
         _MarketInterestModel._marketBorrowLimit = _borrowLimit;
         _MarketInterestModel._marketMarginCallLimit = _marginCallLimit;
-        _MarketInterestModel._marketMinInterestRate = _minimumInterestRate;
-        _MarketInterestModel._marketLiquiditySen = _liquiditySensitivity;
         MarketInterestModelInstance = _MarketInterestModel;
     }
 
@@ -367,25 +358,6 @@ contract MarketData {
         return true;
     }
 
-    function setMinimumInterestRate(uint256 _marketMinInterestRate)
-        external
-        returns (bool)
-    {
-        MarketInterestModelInstance
-            ._marketMinInterestRate = _marketMinInterestRate;
-
-        return true;
-    }
-
-    function setMarketLiquiditySensitivity(uint256 _marketLiquiditySen)
-        external
-        returns (bool)
-    {
-        MarketInterestModelInstance._marketLiquiditySen = _marketLiquiditySen;
-
-        return true;
-    }
-
     function setLimitOfAction(uint256 _limitOfAction) external returns (bool) {
         limitOfAction = _limitOfAction;
         return true;
@@ -506,14 +478,6 @@ contract MarketData {
 
     function getMarketMarginCallLimit() external view returns (uint256) {
         return MarketInterestModelInstance._marketMarginCallLimit;
-    }
-
-    function getMarketMinimumInterestRate() external view returns (uint256) {
-        return MarketInterestModelInstance._marketMinInterestRate;
-    }
-
-    function getMarketLiquiditySensitivity() external view returns (uint256) {
-        return MarketInterestModelInstance._marketLiquiditySen;
     }
 
     function getMarketLiquidityLimit() external view returns (uint256) {

@@ -11,15 +11,10 @@ import "../../Utils/Tokens/standardIERC20.sol";
 contract Manager {
     using SafeMath for uint256;
 
-    //myAnswer
-    uint256 public getAnswer;
-
-    // address public Owner;
+    address public Owner;
 
     ManagerData ManagerDataStorageContract;
     oracleProxy OracleContract;
-
-    // standardIERC20 PersisToken;
 
     struct UserModelAssets {
         uint256 depositAssetSum;
@@ -43,18 +38,18 @@ contract Manager {
 
     uint256 public marketsLength;
 
-    // modifier OnlyOwner() {
-    //     require(msg.sender == Owner, "OnlyOwner");
-    //     _;
-    // }
+    modifier OnlyOwner() {
+        require(msg.sender == Owner, "OnlyOwner");
+        _;
+    }
 
     constructor() {
-        // PersisToken = standardIERC20(_PersisToken);
-        // Owner = msg.sender;
+        Owner = msg.sender;
     }
 
     function setOracleContract(address _OracleContract)
         external
+        OnlyOwner
         returns (bool)
     {
         OracleContract = oracleProxy(_OracleContract);
@@ -63,6 +58,7 @@ contract Manager {
 
     function setManagerDataStorageContract(address _ManagerDataStorageContract)
         external
+        OnlyOwner
         returns (bool)
     {
         ManagerDataStorageContract = ManagerData(_ManagerDataStorageContract);
@@ -71,13 +67,7 @@ contract Manager {
 
     function registerNewHandler(uint256 _marketID, address _marketAddress)
         external
-        returns (bool)
-    {
-        return _registerNewHandler(_marketID, _marketAddress);
-    }
-
-    function _registerNewHandler(uint256 _marketID, address _marketAddress)
-        internal
+        OnlyOwner
         returns (bool)
     {
         ManagerDataStorageContract.registerNewMarketInCore(
@@ -247,7 +237,7 @@ contract Manager {
         (
             _userTotalDepositAssets,
             _userTotalBorrowAssets
-        ) = _getUserUpdatedParamsFromAllMarkets(_userAddress);
+        ) = getUserUpdatedParamsFromAllMarkets(_userAddress);
 
         // if $ value of deposit / user / is 0 , user can't borrow anythig ! so we return 0;
         if (_userTotalDepositAssets == 0) {
@@ -266,16 +256,9 @@ contract Manager {
         }
     }
 
+    // this function is useful to get see how much user can borrow ! and how much is borrowed ! is $ value
     function getUserUpdatedParamsFromAllMarkets(address payable _userAddress)
-        external
-        view
-        returns (uint256, uint256)
-    {
-        return _getUserUpdatedParamsFromAllMarkets(_userAddress);
-    }
-
-    function _getUserUpdatedParamsFromAllMarkets(address payable _userAddress)
-        internal
+        public
         view
         returns (uint256, uint256)
     {
@@ -294,7 +277,7 @@ contract Manager {
                 (
                     _userDepositAsset,
                     _userBorrowAsset
-                ) = _getUpdatedInterestAmountsForUser(_userAddress, ID);
+                ) = getUpdatedInterestAmountsForUser(_userAddress, ID);
 
                 // what is borrow limit for this market ! this is 7- % of user deposit liq;
                 uint256 _marketBorrowLimit = _getMarketBorrowLimit(ID);
@@ -325,14 +308,7 @@ contract Manager {
     function getUpdatedInterestAmountsForUser(
         address payable _userAddress,
         uint256 _marketID
-    ) external view returns (uint256, uint256) {
-        return _getUpdatedInterestAmountsForUser(_userAddress, _marketID);
-    }
-
-    function _getUpdatedInterestAmountsForUser(
-        address payable _userAddress,
-        uint256 _marketID
-    ) internal view returns (uint256, uint256) {
+    ) public view returns (uint256, uint256) {
         // here in this function we get deposit $ and borrow $ of user !
         // get market price from chain link ;
         uint256 _marketTokenPrice = _getUpdatedMarketTokenPrice(_marketID);
@@ -362,54 +338,41 @@ contract Manager {
         return (_userDepositAssets, _userBorrowAssets);
     }
 
-    // function getUserLimitsFromAllMarkets(address payable _userAddress)
-    //     external
-    //     view
-    //     returns (uint256, uint256)
-    // {
-    //     uint256 _userBorrowLimitFromAllMarkets;
-    //     uint256 _userMarginCallLimitLevel;
-    //     (
-    //         _userBorrowLimitFromAllMarkets,
-    //         _userMarginCallLimitLevel
-    //     ) = _getUserLimitsFromAllMarkets(_userAddress);
-    //     return (_userBorrowLimitFromAllMarkets, _userMarginCallLimitLevel);
-    // }
+    function getUserLimitsFromAllMarkets(address payable _userAddress)
+        public
+        view
+        returns (uint256, uint256)
+    {
+        uint256 _userBorrowLimitFromAllMarkets;
+        uint256 _userMarginCallLimitLevel;
+        for (uint256 ID; ID < marketsLength; ID++) {
+            if (ManagerDataStorageContract.getMarketSupport(ID)) {
+                uint256 _userDepositForMarket;
+                uint256 _userBorrowForMarket;
+                (
+                    _userDepositForMarket,
+                    _userBorrowForMarket
+                ) = getUpdatedInterestAmountsForUser(_userAddress, ID);
+                uint256 _borrowLimit = _getMarketBorrowLimit(ID);
+                uint256 _marginCallLimit = _getMarketMarginCallLevel(ID);
+                uint256 _userBorrowLimitAsset = _userDepositForMarket
+                    .unifiedMul(_borrowLimit);
+                uint256 userMarginCallLimitAsset = _userDepositForMarket
+                    .unifiedMul(_marginCallLimit);
+                _userBorrowLimitFromAllMarkets = _userBorrowLimitFromAllMarkets
+                    .add(_userBorrowLimitAsset);
+                _userMarginCallLimitLevel = _userMarginCallLimitLevel.add(
+                    userMarginCallLimitAsset
+                );
+            } else {
+                continue;
+            }
+        }
 
-    // function _getUserLimitsFromAllMarkets(address payable _userAddress)
-    //     internal
-    //     view
-    //     returns (uint256, uint256)
-    // {
-    //     uint256 _userBorrowLimitFromAllMarkets;
-    //     uint256 _userMarginCallLimitLevel;
-    //     for (uint256 ID = 1; ID <= marketsLength; ID++) {
-    //         if (ManagerDataStorageContract.getMarketSupport(ID)) {
-    //             uint256 _userDepositForMarket;
-    //             uint256 _userBorrowForMarket;
-    //             (
-    //                 _userDepositForMarket,
-    //                 _userBorrowForMarket
-    //             ) = _getUpdatedInterestAmountsForUser(_userAddress, ID);
-    //             uint256 _borrowLimit = _getMarketBorrowLimit(ID);
-    //             uint256 _marginCallLimit = _getMarketMarginCallLevel(ID);
-    //             uint256 _userBorrowLimitAsset = _userDepositForMarket
-    //                 .unifiedMul(_borrowLimit);
-    //             uint256 userMarginCallLimitAsset = _userDepositForMarket
-    //                 .unifiedMul(_marginCallLimit);
-    //             _userBorrowLimitFromAllMarkets = _userBorrowLimitFromAllMarkets
-    //                 .add(_userBorrowLimitAsset);
-    //             _userMarginCallLimitLevel = _userMarginCallLimitLevel.add(
-    //                 userMarginCallLimitAsset
-    //             );
-    //         } else {
-    //             continue;
-    //         }
-    //     }
+        return (_userBorrowLimitFromAllMarkets, _userMarginCallLimitLevel);
+    }
 
-    //     return (_userBorrowLimitFromAllMarkets, _userMarginCallLimitLevel);
-    // }
-
+    // here we give match market id; manager will make loop on all markets and get user free liq of user in $;
     function getUserFreeToWithdraw(
         address payable _userAddress,
         uint256 _marketID
@@ -431,12 +394,14 @@ contract Manager {
                 (
                     _userDepositAssets,
                     _userBorrowAssets
-                ) = _getUpdatedInterestAmountsForUser(_userAddress, ID);
+                ) = getUpdatedInterestAmountsForUser(_userAddress, ID);
 
                 // we update total borrow $ value;
                 _totalUserBorrowAssets = _totalUserBorrowAssets.add(
                     _userBorrowAssets
                 );
+
+                // now we multiply user deposit $ value to match market borrow lim! and add them to variable;
                 _userDepositAssetsAfterBorrowLimit = _userDepositAssetsAfterBorrowLimit
                     .add(
                         _userDepositAssets.unifiedMul(_getMarketBorrowLimit(ID))
@@ -453,191 +418,6 @@ contract Manager {
         }
         return 0;
     }
-
-    // function updateRewardManager(address payable _userAddress)
-    //     external
-    //     returns (bool)
-    // {
-    //     if (_updateRewardParams()) {
-    //         return _calcRewardParams(_userAddress);
-    //     }
-
-    //     return false;
-    // }
-
-    // function _updateRewardParams() internal returns (bool) {
-    //     uint256 _currentBlockNumber = block.number;
-
-    //     uint256 _deltaForBlocks = _currentBlockNumber -
-    //         ManagerDataStorageContract.getLastTimeRewardParamsUpdated();
-
-    //     ManagerDataStorageContract.setLastTimeRewardParamsUpdated(
-    //         _currentBlockNumber
-    //     );
-
-    //     if (_deltaForBlocks == 0) {
-    //         return false;
-    //     }
-
-    //     uint256 _rewardPerBlock = ManagerDataStorageContract
-    //         .getcoreRewardPerBlock();
-    //     uint256 _rewardDecrement = ManagerDataStorageContract
-    //         .getcoreRewardDecrement();
-    //     uint256 _rewardTotalAmount = ManagerDataStorageContract
-    //         .getcoreTotalRewardAmounts();
-
-    //     uint256 _timeToFinishReward = _rewardPerBlock.unifiedDiv(
-    //         _rewardDecrement
-    //     );
-
-    //     if (_timeToFinishReward >= _deltaForBlocks.mul(SafeMath.unifiedPoint)) {
-    //         _timeToFinishReward = _timeToFinishReward.sub(
-    //             _deltaForBlocks.mul(SafeMath.unifiedPoint)
-    //         );
-    //     } else {
-    //         return _updateRewardParamsInDataStorage(0, _rewardDecrement, 0);
-    //     }
-
-    //     if (_rewardTotalAmount >= _rewardPerBlock.mul(_deltaForBlocks)) {
-    //         _rewardTotalAmount =
-    //             _rewardTotalAmount -
-    //             _rewardPerBlock.mul(_deltaForBlocks);
-    //     } else {
-    //         return _updateRewardParamsInDataStorage(0, _rewardDecrement, 0);
-    //     }
-
-    //     _rewardPerBlock = _rewardTotalAmount.mul(2).unifiedDiv(
-    //         _timeToFinishReward.add(SafeMath.unifiedPoint)
-    //     );
-    //     /* To incentivze the update operation, the operator get paid with the
-    // 	reward token */
-    //     return
-    //         _updateRewardParamsInDataStorage(
-    //             _rewardPerBlock,
-    //             _rewardDecrement,
-    //             _rewardTotalAmount
-    //         );
-    // }
-
-    // function _updateRewardParamsInDataStorage(
-    //     uint256 _rewardPerBlock,
-    //     uint256 _dcrement,
-    //     uint256 _total
-    // ) internal returns (bool) {
-    //     ManagerDataStorageContract.setCoreRewardPerBlock(_rewardPerBlock);
-    //     ManagerDataStorageContract.setCoreRewardDecrement(_dcrement);
-    //     ManagerDataStorageContract.setCoreTotalRewardAmounts(_total);
-    //     return true;
-    // }
-
-    // function _calcRewardParams(address payable _userAddress)
-    //     internal
-    //     returns (bool)
-    // {
-    //     uint256[] memory handlerAlphaRateBaseAsset = new uint256[](
-    //         marketsLength
-    //     );
-
-    //     uint256 handlerID;
-    //     uint256 alphaRateBaseGlobalAssetSum;
-
-    //     for (uint256 ID = 1; ID <= marketsLength; ID++) {
-    //         handlerAlphaRateBaseAsset[handlerID + 1] = _getAlphaBaseAsset(
-    //             handlerID + 1
-    //         );
-    //         alphaRateBaseGlobalAssetSum = alphaRateBaseGlobalAssetSum.add(
-    //             handlerAlphaRateBaseAsset[handlerID + 1]
-    //         );
-    //     }
-
-    //     handlerID = 0;
-
-    //     for (uint256 ID = 1; ID <= marketsLength; ID++) {
-    //         MarketInterface _MarketInterface = MarketInterface(
-    //             ManagerDataStorageContract.getMarketAddress(ID)
-    //         );
-
-    //         _MarketInterface.updateRewardManagerData(_userAddress);
-
-    //         _MarketInterface.updateRewardPerBlock(
-    //             ManagerDataStorageContract.getcoreRewardPerBlock().unifiedMul(
-    //                 handlerAlphaRateBaseAsset[handlerID + 1].unifiedDiv(
-    //                     alphaRateBaseGlobalAssetSum
-    //                 )
-    //             )
-    //         );
-    //     }
-
-    //     return true;
-    // }
-
-    // function _getAlphaBaseAsset(uint256 _handlerID)
-    //     internal
-    //     view
-    //     returns (uint256)
-    // {
-    //     MarketInterface _MarketContract = MarketInterface(
-    //         ManagerDataStorageContract.getMarketAddress(_handlerID)
-    //     );
-
-    //     uint256 _depositAmount = _MarketContract.getMarketDepositTotalAmount();
-    //     uint256 _borrowAmount = _MarketContract.getMarketBorrowTotalAmount();
-
-    //     uint256 _alpha = ManagerDataStorageContract.getAlphaRate();
-    //     uint256 _price = _getUpdatedMarketTokenPrice(_handlerID);
-    //     return
-    //         _calcAlphaBaseAmount(_alpha, _depositAmount, _borrowAmount)
-    //             .unifiedMul(_price);
-    // }
-
-    // function _calcAlphaBaseAmount(
-    //     uint256 _alpha,
-    //     uint256 _depositAmount,
-    //     uint256 _borrowAmount
-    // ) internal pure returns (uint256) {
-    //     return
-    //         _depositAmount.unifiedMul(_alpha).add(
-    //             _borrowAmount.unifiedMul(SafeMath.unifiedPoint.sub(_alpha))
-    //         );
-    // }
-
-    // function rewardClaimAll(address payable userAddr) external returns (bool) {
-    //     uint256 claimAmountSum;
-    //     for (uint256 ID = 1; ID <= marketsLength; ID++) {
-    //         MarketInterface _MarketInterface = MarketInterface(
-    //             ManagerDataStorageContract.getMarketAddress(ID)
-    //         );
-
-    //         _MarketInterface.updateRewardManagerData(userAddr);
-
-    //         claimAmountSum = claimAmountSum.add(
-    //             _MarketInterface.claimRewardAmountUser(userAddr)
-    //         );
-    //     }
-
-    //     PersisToken.transfer(userAddr, claimAmountSum);
-
-    //     return true;
-    // }
-
-    // function getUpdatedUserRewardAmount(address payable userAddr)
-    //     external
-    //     view
-    //     returns (uint256)
-    // {
-    //     uint256 UpdatedUserRewardAmount;
-    //     for (uint256 ID = 1; ID <= marketsLength; ID++) {
-    //         MarketInterface _MarketInterface = MarketInterface(
-    //             ManagerDataStorageContract.getMarketAddress(ID)
-    //         );
-
-    //         UpdatedUserRewardAmount = UpdatedUserRewardAmount.add(
-    //             _MarketInterface.getUpdatedUserRewardAmount(userAddr)
-    //         );
-    //     }
-
-    //     return UpdatedUserRewardAmount;
-    // }
 
     // ////////////////////////////////////////////////////////////////////////////////////////////////////////// MANAGER TOOLS
 

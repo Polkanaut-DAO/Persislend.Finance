@@ -22,9 +22,11 @@ contract oracleProxy {
         _;
     }
 
-    constructor(address ethOracle) {
+    constructor(address ethOracle, address linkOracle) {
         owner = payable(msg.sender);
         _setOracleFeed(0, ethOracle, 8, false, 0);
+        _setOracleFeed(1, ethOracle, 8, false, 0);
+        _setOracleFeed(2, linkOracle, 8, false, 0);
     }
 
     function _setOracleFeed(
@@ -48,29 +50,57 @@ contract oracleProxy {
     }
 
     function getTokenPrice(uint256 tokenID) external view returns (uint256) {
-        // Oracle memory _oracle = oracle[tokenID];
-        // // _oracle.feed.latestAnswer();
-        // uint256 underlyingPrice = uint256(_oracle.feed.getLatestPrice());
+        uint256 _tokenPrice;
 
-        // uint256 unifiedPrice = _convertPriceToUnified(
-        //     underlyingPrice,
-        //     _oracle.feedUnderlyingPoint
-        // );
+        // there is not DAI contract from chainlink deployed on Goerli to get price , so we set price to 1 by default
+        if (tokenID == 1) {
+            Oracle memory _oracle = oracle[tokenID];
+            // _oracle.feed.latestAnswer();
+            uint256 underlyingPrice = uint256(100055314);
 
-        // if (_oracle.needPriceConvert) {
-        //     _oracle = oracle[_oracle.priceConvertID];
-        //     uint256 convertFeedUnderlyingPrice = uint256(
-        //         _oracle.feed.getLatestPrice()
-        //     );
-        //     uint256 convertPrice = _convertPriceToUnified(
-        //         convertFeedUnderlyingPrice,
-        //         oracle[2].feedUnderlyingPoint
-        //     );
-        //     unifiedPrice = unifiedMul(unifiedPrice, convertPrice);
-        // }
+            _tokenPrice = _convertPriceToUnified(
+                underlyingPrice,
+                _oracle.feedUnderlyingPoint
+            );
 
-        // require(unifiedPrice != 0);
-        return 1;
+            if (_oracle.needPriceConvert) {
+                _oracle = oracle[_oracle.priceConvertID];
+                uint256 convertFeedUnderlyingPrice = uint256(
+                    _oracle.feed.getLatestPrice()
+                );
+                uint256 convertPrice = _convertPriceToUnified(
+                    convertFeedUnderlyingPrice,
+                    oracle[2].feedUnderlyingPoint
+                );
+                _tokenPrice = unifiedMul(_tokenPrice, convertPrice);
+            }
+
+            require(_tokenPrice != 0);
+        } else {
+            Oracle memory _oracle = oracle[tokenID];
+            // _oracle.feed.latestAnswer();
+            uint256 underlyingPrice = uint256(_oracle.feed.getLatestPrice());
+
+            _tokenPrice = _convertPriceToUnified(
+                underlyingPrice,
+                _oracle.feedUnderlyingPoint
+            );
+
+            if (_oracle.needPriceConvert) {
+                _oracle = oracle[_oracle.priceConvertID];
+                uint256 convertFeedUnderlyingPrice = uint256(
+                    _oracle.feed.getLatestPrice()
+                );
+                uint256 convertPrice = _convertPriceToUnified(
+                    convertFeedUnderlyingPrice,
+                    oracle[2].feedUnderlyingPoint
+                );
+                _tokenPrice = unifiedMul(_tokenPrice, convertPrice);
+            }
+
+            require(_tokenPrice != 0);
+        }
+        return _tokenPrice;
     }
 
     function getOwner() public view returns (address) {

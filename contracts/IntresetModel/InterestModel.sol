@@ -183,6 +183,41 @@ contract InterestModel {
             );
     }
 
+    // in this function we calculate Annual Interest Rate for our platform, there is 2 type of Annual Interest Rate for us;
+    // Annual Interest Rate YEAR; Annual Interest Rate BLOCK ==> Annual Interest Rate / blocks per year;
+
+    // there is utilization rate of market factor , that is borrow total / borrow total + deposit total;
+    // borrow Annual Interest Rate = minimum intreset rate + utilization factor * Liquidity sensitivity;
+    // supply Annual Interest Rate = borrow Annual Interest Rate * utilization factor;
+
+    // now we calculated the year Annual Interest Rate, but in our platform we have Annual Interest Rate per block;
+    // Supply Interest Rate / blocks per year ; Borrow Interest Rate / blocks per year;
+
+    // ** deltaBlocks * intresetRate + 1 * action Exchange rate
+
+    // we can't store exchange rate for every block and we need this rate for all block ! so we calc exchange rate from block i to block j;
+    // exchange rate from block i to j * 1 + intresetRate
+
+    // so for calc intresetRate from block 1 to block 10; for deposit amount 1000; 1000 * ( EXR 10 / EXR1);
+
+    // ** as we said , for every block EXR is => actionEXR * ( 1 + intresetRate );
+
+    // ** intresetRate is same for all blocks ! we just need to cal exchange rate from block i to j ;
+
+    // so for calc exchange rate for multiple blocks ! deltaBlock*intresetRate + 1 * actionEXR;
+
+    // for every block we need to update user data and market data ! for this we need new exchange rate !
+    // exchange rate @ block 10 / user deposit exchange rate @ block 5 !
+    // if new exchange rate is more than 1ether or 1 * 10 ** 18 ! so new exchange rate = new exchange rate  - start point !
+    // * so negative is false
+    // if new exchange rate is lower than 1ether or 1 * 10 ** 18 ! so new exchange rate = start point - new exchange rate  !
+    // so negative is true;
+
+    // and new amount will get calculated by multiply user amount to new exchange rate and !
+
+    // *** global exchange rate and action exchange rate are useful for get new global exchange rate
+    // *** user exchange rate and new global exchange rate are useful for see there is negative factor ! and calc new amount for market and user !
+
     // game is happening here :)
     function _calcInterestModelForUser(
         address payable _userAddress,
@@ -288,11 +323,13 @@ contract InterestModel {
         uint256 _BIR;
 
         //calc Annual Deposit / Borrow Interest Rate
+        // this is yearly interest rate for supply and borrow;
         (_SIR, _BIR) = _getSIRandBIR(_depositTotalAmount, _borrowTotalAmount);
 
         // calc Deposit / Borrow Interest Rate / Block
-        uint256 _finalSIR = _SIR / blocksPerYear;
-        uint256 _finalBIR = _BIR / blocksPerYear;
+        // but we need intresetRate per block ! so we divide yearly supply and borrow interest rate to blocks per year;
+        uint256 _finalSIR = _SIR.div(blocksPerYear);
+        uint256 _finalBIR = _BIR.div(blocksPerYear);
 
         return (_finalSIR, _finalBIR);
     }
@@ -310,6 +347,8 @@ contract InterestModel {
         uint256 _BIR;
 
         // Annual Borrow Interest Rate = minimum intreset rate + _marketRate * marketBasicSen
+        // there is minimum intreset rate for borrow that ise setuped by admin !
+        // so minimum intreset rate + (U factor * S)
         if (_marketRate < marketJPoint) {
             _BIR = _marketRate.unifiedMul(marketBasicSen).add(marketMinRate);
         } else {
@@ -337,17 +376,22 @@ contract InterestModel {
         return _borrowTotalAmount.unifiedDiv(_depositTotalAmount);
     }
 
+    // this is new EXR for multiple blocks !
     function _getNewDepositGlobalEXR(
         uint256 _DepositActionEXR,
         uint256 _userInterestModelSIR,
         uint256 _Delta
     ) internal pure returns (uint256) {
         return
+            //Enext = Eprev ∗ (1 + δ ∗ r)
             _userInterestModelSIR.mul(_Delta).add(startPoint).unifiedMul(
                 _DepositActionEXR
             );
     }
 
+    // now we calc amount with  Interest Rate
+    // user EXR is user deposited EXR; but we now have global EXR;
+    // (global EXR / user EXR )* amount !
     function _getNewDeltaRate(
         uint256 _userAmount,
         uint256 _userEXR,
@@ -357,8 +401,12 @@ contract InterestModel {
         uint256 _DeltaAmount;
         bool _negativeFlag;
 
+        // if user amount for borrow or supply is more than 0 !
         if (_userAmount != 0) {
+            // we calc this => (GEXR / UEXR) * amount !
             (_negativeFlag, _DeltaEXR) = _getDeltaEXR(_globalEXR, _userEXR);
+
+            // now delta amount = user amount * exchange rate !
             _DeltaAmount = _userAmount.unifiedMul(_DeltaEXR);
         }
 
@@ -370,11 +418,14 @@ contract InterestModel {
         pure
         returns (bool, uint256)
     {
+        // we get new EXR by GEXR / USER EXR
         uint256 EXR = _globalEXR.unifiedDiv(_userEXR);
+
+        //if exr > 1 !? no negative and no delta amount !
         if (EXR >= startPoint) {
             return (false, EXR.sub(startPoint));
         }
-
+        // else ! there is negative and delta
         return (true, startPoint.sub(EXR));
     }
 
