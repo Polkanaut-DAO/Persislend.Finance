@@ -7,7 +7,7 @@ contract DAI is ERC20 {
     constructor() ERC20("DAI", "DAI", 18) {}
 
     function mintFreeDai() external returns (bool) {
-        _mint(msg.sender, 100000000000000000000);
+        _mint(msg.sender, 10000000000000000000000);
         return true;
     }
 }

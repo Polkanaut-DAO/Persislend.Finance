@@ -769,7 +769,7 @@ contract ETHMarket {
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////// INTERFACE FUNCTIONS
 
-    function getMarketMarginCallLimit() external view returns (uint256) {
+    function getMarketMarginCallLimit() public view returns (uint256) {
         return DataStorageContract.getMarketMarginCallLimit();
     }
 
@@ -827,6 +827,42 @@ contract ETHMarket {
 
     function getMarketBorrowTotalAmount() external view returns (uint256) {
         return DataStorageContract.getMarketBorrowTotalAmount();
+    }
+
+    function getUserLiquidationPrice() external view returns (uint256) {
+        uint256 LiquidationPrice;
+
+        uint256 liquidationLimitAssetSum;
+        uint256 userBorrowAssetSum;
+
+        uint256 tokenListLength = ManagerContract.marketsLength();
+
+        for (uint256 ID; ID < tokenListLength; ID++) {
+            if (ManagerContract.getMarketSupport(ID)) {
+                uint256 depositAsset;
+                uint256 borrowAsset;
+                (depositAsset, borrowAsset) = ManagerContract
+                    .getUpdatedInterestAmountsForUser(payable(msg.sender), ID);
+
+                uint256 marginCallLimit = ManagerContract
+                    .getMarketMarginCallLevel(ID);
+
+                liquidationLimitAssetSum = add(
+                    liquidationLimitAssetSum,
+                    unifiedMul(depositAsset, marginCallLimit)
+                );
+                userBorrowAssetSum = add(userBorrowAssetSum, borrowAsset);
+            }
+        }
+
+        if (liquidationLimitAssetSum >= userBorrowAssetSum) {
+            LiquidationPrice = sub(
+                liquidationLimitAssetSum,
+                userBorrowAssetSum
+            );
+        }
+
+        return LiquidationPrice;
     }
 
     /* ******************* Safe Math ******************* */

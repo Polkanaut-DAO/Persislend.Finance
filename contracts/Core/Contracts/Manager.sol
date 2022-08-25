@@ -476,4 +476,8 @@ contract Manager {
 
         return _MarketInterface.getMarketBorrowLimit();
     }
+
+    function getMarketSupport(uint256 _marketID) external view returns (bool) {
+        return ManagerDataStorageContract.getMarketSupport(_marketID);
+    }
 }
